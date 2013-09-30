@@ -415,10 +415,13 @@ void Spline::Interpolate()
 // controlPoints.append(ctrl);
 void Spline::CalcControlPoints()
 {
-    float ratio = 0.33333333333;
+    float ratio;
+    float base = 0.5;
     Node* pCP[2];
-    vec3 pos;
+    vec3 pos,temp,temp2;
     Node* p1,* p2;
+    vector<float> cArray;
+    vector<vec3> dArray;
 	// Clear previous controlPoints
 	deleteNodes(controlPoints);
 	// Based on style use appropriate ways to compute control points
@@ -428,44 +431,117 @@ void Spline::CalcControlPoints()
         case BezierDeCasteljau:
         case BezierMatrix:
 
-        if( interpPoints.size() < 2 )
+        if( totalPoints < 2 )
             break;
 
         for( int i = 0; i < interpPoints.size()-1; ++i )
         {
             for( int c = 0; c < 2; ++c )
             {
-                p1 = i+c-1 < 0 ? startPoint : interpPoints[i+c-1];
-                p2 = i+c+1 >= interpPoints.size() ? endPoint : interpPoints[i+c+1];
+                if( i+c-1 < 0 )
+                {
+                    p1 = startPoint;
+                    p2 = interpPoints[i+c] ;
+                    ratio = 2;
+                }
+                else if( i+c+1 >= interpPoints.size() )
+                {
+                    p1 = interpPoints[i+c];
+                    p2 = endPoint;
+                    ratio = 2;
+                }
+                else
+                {
+                    p1 = ( i+c-1 < 0 ? startPoint : interpPoints[i+c-1] );
+                    p2 = ( i+c+1 >= interpPoints.size() ? endPoint : interpPoints[i+c+1] );
+                    ratio = 0.3333333333333333;
+                }
                 pCP[c] = new Node( graph, ControlPoints );
-                //                    pos[0] = interpPoints[i+c]->x() + ratio * 0.5 *
-                //                                ( p2->x() + p1->x() );
-
-                //                    pos[1] = interpPoints[i+c]->y() + ratio * 0.5 *
-                //                            ( p2->y() + p1->y() );
-                pos = interpPoints[i+c]->getPosition() + ratio * 0.5 * ( p2->getPosition() - p1->getPosition() );
+                pos = interpPoints[i+c]->getPosition() + base * ratio * ( p2->getPosition() - p1->getPosition() );
 
                 pCP[c]->setPosition( pos );
                 controlPoints.append(pCP[c]);
-                ratio = -ratio;
+                base = -base;
             }
         }
         break;
 
         case BSpline:
-            // make sure there are at least 2 totalPoints.
-            // ADD YOUR CODE HERE
+            calcBsplineCtlPoints();
+
             break;
             // In the case for Hermite, you want to implement both "clamped" and "natural" versions.
         case HermiteClamped:
-            // make sure there are at least 2 totalPoints.
-            // ADD YOUR CODE HERE
+
+            if( totalPoints < 2 )
+                break;
+            cArray.clear();
+            dArray.clear();
+            cArray.resize(totalPoints);
+            dArray.resize(totalPoints);
+            cArray[0] = 0;
+            dArray[0] = startPoint->getPosition()-interpPoints[0]->getPosition();
+            for( int i = 1; i < totalPoints-1; ++i )
+            {
+                cArray[i] = 1.0f/(4-cArray[i-1]*1);
+                dArray[i] = ( 3 * ( interpPoints[i+1]->getPosition()-interpPoints[i-1]->getPosition() ) - dArray[i-1] ) /
+                            ( 4 -cArray[i-1] );
+            }
+            dArray[totalPoints-1] =
+                    ( endPoint->getPosition() - interpPoints[interpPoints.size()-1]->getPosition() );
+
+
+            //Get the location of control points by calculating the tangent on each interpolation point
+            //Start from the last interpolation point
+            pos = dArray[interpPoints.size()-1];
+            p1 = new Node( graph, ControlPoints );
+            p1->setPosition( pos  );
+            controlPoints.prepend(p1);
+
+            for( int i = totalPoints-2; i >= 0; --i )
+            {
+                pos = dArray[i] - cArray[i]*pos;
+                p1 = new Node( graph, ControlPoints );
+                p1->setPosition( pos);
+                controlPoints.prepend(p1);
+            }
             break;
         case HermiteNatural:
-            // make sure there are at least 2 totalPoints.
-            // ADD YOUR CODE HERE
+
+            if( totalPoints < 2 )
+                break;
+            cArray.clear();
+            dArray.clear();
+            cArray.resize(totalPoints);
+            dArray.resize(totalPoints);
+            cArray[0] = 0.5;
+            dArray[0] = 3*(interpPoints[1]->getPosition()-interpPoints[0]->getPosition() )*0.5;
+            for( int i = 1; i < totalPoints-1; ++i )
+            {
+                cArray[i] = 1.0f/(4-cArray[i-1]*1);
+                dArray[i] = ( 3 * ( interpPoints[i+1]->getPosition()-interpPoints[i-1]->getPosition() ) - dArray[i-1] ) /
+                            ( 4 -cArray[i-1] );
+            }
+            dArray[totalPoints-1] =
+                   ( 3*(  interpPoints[totalPoints-1]->getPosition() - interpPoints[interpPoints.size()-2]->getPosition() ) -
+                    dArray[totalPoints-2] ) / (2-cArray[totalPoints-2]);
+
+            //Get the location of control points by calculating the tangent on each interpolation point
+            //Start from the last interpolation point
+            pos = dArray[interpPoints.size()-1];
+            p1 = new Node( graph, ControlPoints );
+            p1->setPosition( pos  );
+            controlPoints.prepend(p1);
+
+            for( int i = totalPoints-2; i >= 0; --i )
+            {
+                pos = dArray[i] - cArray[i]*pos;
+                p1 = new Node( graph, ControlPoints );
+                p1->setPosition( pos);
+                controlPoints.prepend(p1);
+            }
             break;
-	}
+    }
 }
 
 inline int factorial( int a )
@@ -518,6 +594,10 @@ void Spline::InterpBernstein()
     vec3 pos;
     for( int i = 0; i < interpPoints.size()-1; ++i )
     {
+        curvePoint = new Node( graph, CurvePoints );
+        curvePoint->setPosition( interpPoints[i]->getPosition() );
+        curvePoints.append( curvePoint );
+
         cP[0] = interpPoints[i];
         cP[1] = controlPoints[2*i];
         cP[2] = controlPoints[2*i+1];
@@ -531,6 +611,7 @@ void Spline::InterpBernstein()
             pos = vec3(0);
             for( int deg= 0; deg <= 3; ++deg )
             {
+                //contruct curve points from Bernstein polynomials
                 pos += pow( uu, deg ) * pow( 1-uu, 3-deg ) *
                         6.0f / ( factorial(deg) * factorial( 3-deg ) ) * cP[deg]->getPosition();
 
@@ -542,7 +623,9 @@ void Spline::InterpBernstein()
         }
 
     }
-
+    curvePoint = new Node( graph, CurvePoints );
+    curvePoint->setPosition( interpPoints[interpPoints.size()-1]->getPosition() );
+    curvePoints.append( curvePoint );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -576,7 +659,45 @@ void Spline::InterpBernstein()
 // curvePoints.append(newNode);
 void Spline::InterpCasteljau()
 {
-	// ADD YOU CODE HERE
+    if( controlPoints.size() < 2 )
+        return;
+    float delta = 1.0f/Division;
+    float uu;
+    Node* cP[4];
+    Node* curvePoint;
+    vec3 pos[6];  //6 interploating pionts
+    for( int i = 0; i < interpPoints.size()-1; ++i )
+    {
+        curvePoint = new Node( graph, CurvePoints );
+        curvePoint->setPosition( interpPoints[i]->getPosition() );
+        curvePoints.append( curvePoint );
+
+        cP[0] = interpPoints[i];
+        cP[1] = controlPoints[2*i];
+        cP[2] = controlPoints[2*i+1];
+        cP[3] = interpPoints[i+1];
+
+        uu = delta;
+        for( int u = 1; u < Division; ++u )
+        {
+            curvePoint = new Node( graph, CurvePoints );
+
+            pos[0] = ( cP[1]->getPosition() - cP[0]->getPosition() ) * uu + cP[0]->getPosition();
+            pos[1] = ( cP[2]->getPosition() - cP[1]->getPosition() ) * uu + cP[1]->getPosition();
+            pos[2] = ( cP[3]->getPosition() - cP[2]->getPosition() ) * uu + cP[2]->getPosition();
+            pos[3] = ( pos[1] -pos[0] ) * uu + pos[0];
+            pos[4] = ( pos[2] - pos[1] ) * uu + pos[1];
+            pos[5] = ( pos[4] - pos[3] ) * uu + pos[3];
+
+            curvePoint->setPosition( pos[5] );
+            curvePoints.append( curvePoint );
+            uu += delta;
+        }
+
+    }
+    curvePoint = new Node( graph, CurvePoints );
+    curvePoint->setPosition( interpPoints[interpPoints.size()-1]->getPosition() );
+    curvePoints.append( curvePoint );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -616,12 +737,10 @@ void Spline::InterpCasteljau()
 // mat4 M;
 // vec3 B = M*A;
 // (It automatically transfer the A and B vectors to homogeneous vectors)
-float m[16] = { -1.0f, 3.0f, -3.0f, 1.0f,
-                 3.0f, -6.0f, 3.0f, 0,
-                -3.0f, 3.0f, 0.0f, 0,
-                 1.0f, 0, 0, 0 };
-
-
+float bezier_m[16] = { -1.0f, 3.0f, -3.0f, 1.0f,
+                        3.0f, -6.0f, 3.0f, 0,
+                       -3.0f, 3.0f, 0.0f, 0,
+                        1.0f, 0, 0, 0 };
 void Spline::InterpMatrix()
 {
     if( controlPoints.size() < 2 )
@@ -632,10 +751,15 @@ void Spline::InterpMatrix()
     Node* curvePoint;
     vec3 pos;
     vec4 uvec;
-    mat4 m4( m );
+
+    mat4 m4( bezier_m );
 
     for( int i = 0; i < interpPoints.size()-1; ++i )
     {
+        curvePoint = new Node( graph, CurvePoints );
+        curvePoint->setPosition( interpPoints[i]->getPosition() );
+        curvePoints.append( curvePoint );
+
         cP[0] = interpPoints[i]->getPosition();
         cP[1] = controlPoints[2*i]->getPosition();
         cP[2] = controlPoints[2*i+1]->getPosition();
@@ -657,7 +781,9 @@ void Spline::InterpMatrix()
         }
 
     }
-
+    curvePoint = new Node( graph, CurvePoints );
+    curvePoint->setPosition( interpPoints[interpPoints.size()-1]->getPosition() );
+    curvePoints.append( curvePoint );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -679,9 +805,53 @@ void Spline::InterpMatrix()
 // This function modifies the following member variables
 // curvePoints	- type: QList<Node *>
 //				  discription: stores all the points that form the curve, including all interpolation points
+float bspline_m[16] = { -1.0f, 3.0f, -3.0f, 1.0f,
+                        3.0f, -6.0f, 0.0f, 4,
+                       -3.0f, 3.0f, 3.0f,  1,
+                        1.0f, 0, 0, 0 };
 void Spline::InterpBSpline()
 {
-	// ADD YOUR CODE HERE
+    if( controlPoints.size() < 4 )
+        return;
+    float delta = 1.0f/Division;
+    float uu;
+    vec3 cP[4];
+    Node* curvePoint;
+    vec3 pos;
+    vec4 uvec;
+
+    mat4 m4( bspline_m );
+
+    for( int i = 0; i < interpPoints.size()-1; ++i )
+    {
+        curvePoint = new Node( graph, CurvePoints );
+        curvePoint->setPosition( interpPoints[i]->getPosition() );
+        curvePoints.append( curvePoint );
+
+        cP[0] = controlPoints[i]->getPosition();
+        cP[1] = controlPoints[i+1]->getPosition();
+        cP[2] = controlPoints[i+2]->getPosition();
+        cP[3] = controlPoints[i+3]->getPosition();
+
+        uu = delta;
+        for( int u = 1; u < Division; ++u )
+        {
+            curvePoint = new Node( graph, CurvePoints );
+            uvec = vec4( uu*uu*uu, uu*uu, uu, 1 );
+            pos[0] = 0.16666* uvec * m4 * vec4( cP[0][0], cP[1][0], cP[2][0], cP[3][0] );
+            pos[1] = 0.16666*uvec * m4 * vec4( cP[0][1], cP[1][1], cP[2][1], cP[3][1] );
+            pos[2] = 0.16666*uvec * m4 * vec4( cP[0][2], cP[1][2], cP[2][2], cP[3][2] );
+
+
+            curvePoint->setPosition( pos );
+            curvePoints.append( curvePoint );
+            uu += delta;
+        }
+
+    }
+    curvePoint = new Node( graph, CurvePoints );
+    curvePoint->setPosition( interpPoints[interpPoints.size()-1]->getPosition() );
+    curvePoints.append( curvePoint );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -703,9 +873,56 @@ void Spline::InterpBSpline()
 // This function modifies the following member variables
 // curvePoints	- type: QList<Node *>
 //				  discription: stores all the points that form the curve, including all interpolation points
+
+float hermite_m[16] = { 2.0f, -3.0f,  0.0f,  1.0f,
+                       -2.0f,  3.0f,  0.0f, 0.0f,
+                        1.0f,  -2.0f,  1.0f,  0.0f,
+                        1.0f,  -1.0f,  0.0f,  0.0f };
 void Spline::InterpHermiteClamped()
 {
-	// ADD YOUR CODE HERE
+    if( controlPoints.size() < 2 )
+        return;
+    float delta = 1.0f/Division;
+    float uu;
+    vec3 cP[4];
+    Node* curvePoint;
+    vec3 pos;
+    vec4 uvec;
+
+    mat4 m44( hermite_m );
+
+    for( int i = 0; i < interpPoints.size()-1; ++i )
+    {
+        curvePoint = new Node( graph, CurvePoints );
+        curvePoint->setPosition( interpPoints[i]->getPosition() );
+        curvePoints.append( curvePoint );
+
+        cP[0] = interpPoints[i]->getPosition();
+        cP[1] = interpPoints[i+1]->getPosition();
+        cP[2] = controlPoints[i]->getPosition();
+        cP[3] = controlPoints[i+1]->getPosition();
+        uu = delta;
+        for( int u = 1; u < Division; ++u )
+        {
+            curvePoint = new Node( graph, CurvePoints );
+            //uvec = vec4( uu*uu*uu, uu*uu, uu, 1 );
+            //pos[0] = uvec * m44 * vec4( cP[0][0], cP[1][0], cP[2][0], cP[3][0] );
+            //pos[1] = uvec * m44 * vec4( cP[0][1], cP[1][1], cP[2][1], cP[3][1] );
+            //pos[2] = uvec * m44 * vec4( cP[0][2], cP[1][2], cP[2][2], cP[3][2] );
+            pos = ( (2*uu - 3)*uu*uu +1 )*cP[0] +
+                    ( (-2*uu + 3 )*uu*uu )*cP[1] +
+                    ( ( uu-2 )*uu*uu + uu )*cP[2]+
+                    ( (uu-1)*uu*uu ) * cP[3];
+
+            curvePoint->setPosition( pos );
+            curvePoints.append( curvePoint );
+            uu += delta;
+        }
+
+    }
+    curvePoint = new Node( graph, CurvePoints );
+    curvePoint->setPosition( interpPoints[interpPoints.size()-1]->getPosition() );
+    curvePoints.append( curvePoint );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -731,4 +948,143 @@ void Spline::InterpHermiteClamped()
 void Spline::InterpHermiteNatural()
 {
 	// ADD YOUR CODE HERE.
+    InterpHermiteClamped();
 }
+
+void  Spline::calcBsplineCtlPoints()
+{
+    vector<float> lambda;
+    matrix<float> mat(totalPoints+2,totalPoints+2);
+    matrix<float> cx( totalPoints+2,1 );
+    matrix<float> cy( totalPoints+2,1 );
+    matrix<float> cz( totalPoints+2,1 );
+    matrix<float> dx( totalPoints+2,1 );
+    matrix<float> dy( totalPoints+2,1 );
+    matrix<float> dz( totalPoints+2,1 );
+    vec3 pos;
+    Node* cP = 0;
+
+    if( totalPoints < 2 )
+        return;
+
+    for( int h =0; h < totalPoints+2; ++h )
+        for( int w = 0; w < totalPoints+2; ++w )
+            mat(w,h) = 0;
+
+
+    mat(0,0) = 0.25f;
+    mat(0,1) = -0.5f;
+    mat(0,2) = 0.25f;
+
+    pos = interpPoints[0]->getPosition();
+    dx(0,0) = 0;
+    dy(0,0) = 0;
+    dz(0,0) = 0;
+
+    for( int i = 1; i <= totalPoints; ++i )
+    {
+        mat(i,i-1) = 0.167f;
+        mat(i,i  ) = 0.667f;
+        mat(i,i+1) = 0.167f;
+
+        pos = interpPoints[i-1]->getPosition();
+        dx(i,0) = pos[0];
+        dy(i,0) = pos[1];
+        dz(i,0) = pos[2];
+    }
+
+    dx(totalPoints+1,0) = 0;
+    dy(totalPoints+1,0) = 0;
+    dz(totalPoints+1,0) = 0;
+    mat( totalPoints+1, totalPoints-1) = 0.25f;
+    mat( totalPoints+1, totalPoints  ) = -0.5f;
+    mat( totalPoints+1, totalPoints+1) = 0.25f;
+
+
+    cx = mat.Solve(dx);
+    cy = mat.Solve(dy);
+    cz = mat.Solve(dz);
+
+    for( int i = 0; i < totalPoints+2; ++i )
+    {
+       cP = new Node( graph, ControlPoints );
+       pos[0] = cx(i,0);
+       pos[1] = cy(i,0);
+       pos[2] = cz(i,0);
+       cP->setPosition(pos);
+       controlPoints.append(cP);
+    }
+}
+
+//void  Spline::calcBsplineCtlPoints()
+//{
+//    vector<float> lambda;
+//    matrix<float> mat(totalPoints,totalPoints);
+//    matrix<float> cx( totalPoints,1 );
+//    matrix<float> cy( totalPoints,1 );
+//    matrix<float> cz( totalPoints,1 );
+//    matrix<float> dx( totalPoints,1 );
+//    matrix<float> dy( totalPoints,1 );
+//    matrix<float> dz( totalPoints,1 );
+//    vec3 pos;
+//    Node* cP = 0;
+
+//    if( totalPoints < 4 )
+//        return;
+
+//    for( int h =0; h < totalPoints; ++h )
+//        for( int w = 0; w < totalPoints; ++w )
+//            mat(w,h) = 0;
+
+
+//    mat(0,0) = 3;
+//    mat(0,1) = -1;
+//    mat(0,2) = 0;
+
+//    mat(1,0) = 1.0f/4.0f;
+//    mat(1,1) = 7.0/12.0f;
+//    mat(1,2) = 1.0f/6.0f;
+//    pos = interpPoints[0]->getPosition();
+//    dx(0,0) = 2*pos[0]; dy(0,0) = 2*pos[1]; dz(0,0) = 2*pos[2];
+//    pos = interpPoints[1]->getPosition();
+//    dx(1,0) = pos[0]; dy(1,0) = pos[1]; dz(1,0) = pos[2];
+//    //dx(0,0) = dy(0,0) = dz(0,0) = 0;
+
+//    for( int i = 1; i <= totalPoints-4; ++i )
+//    {
+//        mat(i+1,i) = 0.167;
+//        mat(i+1,i+1) = 0.667;
+//        mat(i+1,i+2) = 0.167;
+
+//        pos = interpPoints[i+1]->getPosition();
+//        dx(i+1,0) = pos[0];
+//        dy(i+1,0) = pos[1];
+//        dz(i+1,0) = pos[2];
+//    }
+//    pos = interpPoints[totalPoints-2]->getPosition();
+//    dx(totalPoints-2,0) = pos[0]; dy(totalPoints-2,0) = pos[1]; dz(totalPoints-2,0) = pos[2];
+//    mat( totalPoints-2, totalPoints-3) = 1.0f/6.0f;
+//    mat( totalPoints-2, totalPoints-2 ) = 7.0f/12.0f;
+//    mat( totalPoints-2, totalPoints-1) = 1.0f/4.0f;
+
+//    pos = interpPoints[totalPoints-1]->getPosition();
+//    dx(totalPoints-1,0) = 2*pos[0]; dy(totalPoints-1,0) = 2*pos[1]; dz(totalPoints-1,0) = 2*pos[2];
+//    mat( totalPoints-1, totalPoints-3) = 0;
+//    mat( totalPoints-1, totalPoints-2 ) = -1;
+//    mat( totalPoints-1, totalPoints-1) = 3;
+
+
+//    cx = mat.Solve(dx);
+//    cy = mat.Solve(dy);
+//    cz = mat.Solve(dz);
+
+//    for( int i = 0; i < totalPoints; ++i )
+//    {
+//       cP = new Node( graph, ControlPoints );
+//       pos[0] = cx(i,0);
+//       pos[1] = cy(i,0);
+//       pos[2] = cz(i,0);
+//       cP->setPosition(pos);
+//       controlPoints.append(cP);
+//    }
+//}

@@ -99,6 +99,9 @@ private:
     void calcPseudoEdges();
 
 	void HermiteHelper(matrix<float>&, matrix<float>&, matrix<float>&);
+
+    //caculate Bspline control points
+    void calcBsplineCtlPoints();
 };
 
 #endif // SPLINE_H
